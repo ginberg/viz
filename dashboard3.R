@@ -28,7 +28,12 @@ ui <- dashboardPage(
     tags$head(
       tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")
     ),
-    plotOutput("totalBR", height = 300, width = 1200)
+    tabsetPanel(
+      tabPanel("Tab1", plotOutput("totalBR", height = 400, width = 1200)), 
+      tabPanel("Tab2", htmlOutput("totalBRvis"))
+      )
+    
+    #plotOutput("totalBR", height = 400, width = 1200)
     #htmlOutput("totalBRvis")
   )
 )
