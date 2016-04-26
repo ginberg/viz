@@ -3,116 +3,310 @@ library(shiny)
 library(shinydashboard)
 library(ggplot2)
 library(googleVis)
+library(reshape2)
+library(plyr)
+library(scales)
+library(DT)
 
-setwd("~/admin/freelance/trifinance/code/viz")
+dashboard_input_path <- "Z:/Shared Data/5501_ProjectDataQuality/3_Output Data/dashboard"
+portia_files <- c("Portia_del4a_dqa.csv","Portia_del4b_dqa.csv")
+portia_current_date <- "2016-04-12"
+fa_files <- c("FrontArena_del4b_dqa.csv") #"FrontArena_del4a_dqa.csv", 
+fa_current_date <- "2016-04-13"
+globes_files <- c("Globe$_del4b_dqa.csv")
+globes_current_date <- "2016-04-26"
+vis_files <- c("VIS_del4b_dqa.csv")
+vis_current_date <- "2016-02-19"
+
+errors <- "errors"
+failed <- "failed"
+whitelisted <- "whitelisted"
+blacklisted <- "blacklisted"
+unhandled <- "unhandled"
+types <- c(unhandled, blacklisted, whitelisted)
+selected<- c(unhandled, blacklisted, whitelisted)
+
+dbHeader <- dashboardHeader(title = "DQSS dashboard")
+#print(dbHeader)
+#dbHeader$children[[2]]$children <- tags$a(href='http://deltalloyd.com', tags$img(src='dl.png'))
 
 ui <- dashboardPage(
-  dashboardHeader(title = "DQSS dashboard"),
-  dashboardSidebar(),
-    # sidebarMenu(
-    #   menuItem("Dashboard", tabName = "dashboard", icon = icon("dashboard")),
-    #   menuItem("Business Rules", tabName = "Business Rules", icon = icon("th"))),width = 150),
+  dbHeader,
+  dashboardSidebar(
+    selectInput("system", "System",
+                c("Portia" = "po",
+                  "Front Arena" = "fa",
+                  "Globes" = "gl",
+                  "VIS" = "vi")),
+    checkboxGroupInput("types","Types",types, selected = selected),
+    uiOutput("sliderBR"),
+    uiOutput("sliderDE")
+  ),
   dashboardBody(
-    #tabItems(
-      # dashboard
-      #tabItem(tabName = "dashboard",
-        # Boxes need to be put in a row (or column)
-        #fluidRow(
-        #column(width = 3, textOutput("summaryBR"))
-          #column(width = 9, uiOutput("sliderBR"))
-        #),
-        # fluidRow(
-        #   box(plotOutput("totalBR", height = 300, width = 1200))
-        # ),
-        fluidRow(
-          column(width = 1,
-            checkboxInput("unhandled", "unhandled", TRUE)
-            ,checkboxInput("confirmed", "confirmed", TRUE)
-            ,checkboxInput("whitelisted", "whitelisted", TRUE)
-            ,checkboxInput("failed", "failed", TRUE)),
-          column(width = 9,htmlOutput("totalBRvis"))
-        )
-        # ,fluidRow(
-        #   htmlOutput("totalBRvis")
-        # )
+    tags$head(
+      tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")
+    ),
+    tabsetPanel(
+      tabPanel("BR", 
+               fluidRow(plotOutput("totalBR", height = 600, width = 1400)),
+               fluidRow(
+                 box(plotOutput("plotBR", height = 250)),
+                 box(uiOutput("selectBR"), dataTableOutput("detailsBR"))
+               )),
+      tabPanel("DE", 
+               fluidRow(plotOutput("totalDE", height = 600, width = 1400)),
+               fluidRow(
+                 box(plotOutput("plotDE", height = 250)),
+                 box(uiOutput("selectDE"), dataTableOutput("detailsDE"))
+               )
       )
-    #)
-  #)
+    )
+  )
 )
 
 server <- function(input, output) {
-  load(file = "testPOError.RData")
-  
-  #Consider failed BR only
-  BRs <- unique(po_current_errors$BR.number)
-  BRs <- BRs[order(BRs)]
-  DEs <- unique(po_current_errors$Data.Element)
-  DEs <- DEs[order(DEs)]
-  
-  #Business rules section
-  # output$summaryBR <- renderText({ 
-  #   paste("Number of failed Business Rules:", length(BRs),
-  #         "Number of failed rules:", sum(po_current_errors$Failed))
-  # })
-  # output$sliderBR <- renderUI({
-  #   ticks  <- c(10,20,30)
-  #   sliderInput("sliderBR", "Select number of failed BR in plot:", min=1, max=length(BRs), value=length(BRs), step=1)
-  # })
-  #totalBR with ggplot
-  # output$totalBR <- renderPlot({
-  #   df <- aggregateAndSelectBR(po_current_errors, input$sliderBR)
-  #   if(nrow(df) >0){
-  #     ggplot(data=df, aes(reorder(BR, -count), count, group = 1)) + geom_bar(stat="identity") + 
-  #       ggtitle("Totale huidige uitval per BR") + xlab("Business Rule nummer") + ylab("Aantal regels")
-  #   } else{
-  #     return()
-  #   }
-  # })
-  #totalBR with googlevis
-  output$totalBRvis <- renderGvis({
-    df <- aggregateAndSelectBR(po_current_errors, input$sliderBR)
-    yvariables <- c()
-    if (!is.null(input$whitelisted) && input$whitelisted){
-      yvariables <- c(yvariables, "whitelisted")
-    }
-    if (!is.null(input$failed) && input$failed){
-      yvariables <- c(yvariables, "failed")
-    }
-    if (!is.null(input$confirmed) && input$confirmed){
-      yvariables <- c(yvariables, "confirmed")
-    }
-    if (!is.null(input$unhandled) && input$unhandled){
-      yvariables <- c(yvariables, "unhandled")
-    }
-    if (length(yvariables) > 0){
-      gvisColumnChart(df, xvar="BR", yvar=yvariables
-                      , options=list(
-                      fontSize=9, isStacked=TRUE,
-                      vAxes="[{title:'Aantal regels', viewWindowMode:'explicit', fontSize:16}]",#logScale: true viewWindow:{min:0, max:160}
-                      hAxes="[{title:'Business Rule nummer', textPosition: 'out', fontSize:16}]",
-                      title="Totale huidige uitval per BR", width=1600, height=800,
-                      chartArea="{left:70,top:40,width:'90%',height:'80%'}",
-                      titleTextStyle="{color:'black',fontName:'Courier',fontSize:16}",
-                      bar="{groupWidth:'95%'}")
-                   )
-    } else { return()}
+  po_errors <- renameColumns(getDFErrors(dashboard_input_path, portia_files))
+  po_current_errors <- getDFByDate(po_errors, portia_current_date)
+  fa_errors <- renameColumns(getDFErrors(dashboard_input_path, fa_files))
+  fa_current_errors <- getDFByDate(fa_errors, fa_current_date)
+  gl_errors <- renameColumns(getDFErrors(dashboard_input_path, globes_files))
+  gl_current_errors <- getDFByDate(gl_errors, globes_current_date)
+  vis_errors <- renameColumns(getDFErrors(dashboard_input_path, vis_files))
+  vis_current_errors <- getDFByDate(vis_errors, vis_current_date)
+
+  output$sliderBR <- renderUI({
+    BRs = adjustBR()
+    sliderInput("sliderBR", "Select BR size", min=1, max=length(BRs), value=length(BRs), step=1)
   })
+  
+  output$sliderDE <- renderUI({
+    DEs = adjustDE()
+    sliderInput("sliderDE", "Select DE size", min=1, max=length(DEs), value=length(DEs), step=1)
+  })
+  
+  #totalBR with ggplot
+  output$totalBR <- renderPlot({
+    df <- adjustPlot()
+    if(!is.null(df) && nrow(df) >0){
+      ggplot(data=df, aes(x = BR, y= value, fill = category, order = as.numeric(category))) + geom_bar(stat="identity") +
+        ggtitle("Totale huidige uitval per BR") + xlab("Business Rule nummer") + ylab("Aantal regels") +
+        scale_fill_manual(values = c(whitelisted = "gray", blacklisted = "blue", unhandled = "red")) +
+        scale_x_discrete(limits=unique(df$BR))
+    } else {return()}
+  })
+  
+  output$detailsBR <- DT::renderDataTable({
+    df <- adjustDataset()
+    df <- df[df$BR.number == input$selectBR, ]
+    df <- df[,c("BR.number", "Data.Element", "Source.Date", errors, whitelisted, failed, blacklisted, unhandled)]
+    colnames(df) <- c("BR", "DE", "Date", "total", whitelisted, "failed", blacklisted, unhandled)
+    rownames(df) <- NULL
+    DT::datatable(df, options = list(paging = FALSE, searching = FALSE, info = FALSE))
+  })
+
+  #totalDE with ggplot
+  output$totalDE <- renderPlot({
+    df <- adjustPlotDE()
+    if(!is.null(df) && nrow(df) >0){
+      ggplot(data=df, aes(x = DE, y= value, fill = category, order = as.numeric(category))) + geom_bar(stat="identity") +
+        ggtitle("Totale huidige uitval per DE") + xlab("Data Element") + ylab("Aantal regels") +
+        scale_fill_manual(values = c(whitelisted = "gray", blacklisted = "blue", unhandled = "red")) +
+        scale_x_discrete(limits=unique(df$DE))
+    }
+  })
+  
+  output$detailsDE <- DT::renderDataTable({
+    df <- adjustDataset()
+    df <- df[df$Data.Element == input$selectDE, ]
+    df <- df[,c("BR.number", "Data.Element", "Source.Date", "errors", whitelisted, "failed", blacklisted, "unhandled")]
+    colnames(df) <- c("BR", "DE", "Date", "total", whitelisted, "failed", blacklisted, unhandled)
+    rownames(df) <- NULL
+    DT::datatable(df, options = list(paging = FALSE, searching = FALSE, info = FALSE))
+  })
+  
+  adjustBR<- reactive({
+    #Adjust BRs based on system input
+    df <- getCurrentErrors(input$system)
+    df <- subsetDF(df, input$types)
+    BRs <- unique(df$BR.number)
+    return(BRs[order(BRs)])
+  })
+  
+  adjustDE<- reactive({
+    #Adjust DEs based on system input
+    df <- getCurrentErrors(input$system)
+    df <- subsetDF(df, input$types)
+    DEs <- unique(df$Data.Element)
+    return(DEs[order(DEs)])
+  })
+  
+  adjustPlot<- reactive({
+    #Adjust BRs based on system input
+    df <- aggregateAndSelectBR(getCurrentErrors(input$system), input$sliderBR, input$types)
+    if(!is.null(input$types)){
+      df <- subsetDF(df, input$types)
+      df <- melt(df[,c('BR', rev(input$types))],id.vars = 1)
+      df$variable <- factor(df$variable, levels = rev(levels(df$variable)))
+      colnames(df) <- c("BR", "category", "value")
+      return(df)
+    } else{
+      return()
+    }
+  })
+  
+  adjustPlotDE<- reactive({
+    #Adjust BRs based on system input
+    df <- aggregateAndSelectDE(getCurrentErrors(input$system), input$sliderDE, input$types)
+    if(!is.null(input$types)){
+      df <- subsetDF(df, input$types)
+      df <- melt(df[,c('DE', rev(input$types))],id.vars = 1)
+      df$variable <- factor(df$variable, levels = rev(levels(df$variable)))
+      colnames(df) <- c("DE", "category", "value")
+      return(df)
+    } else{
+      return()
+    }
+  })
+  
+  adjustDataset<- reactive({
+    #Adjust BRs based on system input
+    return(getErrors(input$system))
+  })
+  
+  #time series BR - selection and plot
+  output$selectBR <- renderUI({
+    selectInput("selectBR", "selectBR", as.list(adjustBR()))
+  })
+  output$plotBR <- renderPlot({
+    df <- adjustDataset()
+    createBRDiffPlot(df, input$selectBR)
+  })
+  
+  #time series DE
+  output$selectDE <- renderUI({
+    selectInput("selectDE", "selectDE", as.list(adjustDE()))
+  })
+  output$plotDE <- renderPlot({
+    df <- adjustDataset()
+    createDEDiffPlot(df, input$selectDE)
+  })
+  
+  getCurrentErrors <- function(inputSystem){
+    if(inputSystem == 'po'){
+      df <- po_current_errors
+    }else if(inputSystem == 'fa'){
+      df <- fa_current_errors
+    }else if(inputSystem == 'gl'){
+      df <- gl_current_errors
+    }else if(inputSystem == 'vi'){
+      df <- vis_current_errors
+    }
+    return(df)
+  }
+  
+  getErrors <- function(inputSystem){
+    if(inputSystem == 'po'){
+      df <- po_errors
+    }else if(inputSystem == 'fa'){
+      df <- fa_errors
+    }else if(inputSystem == 'gl'){
+      df <- gl_errors
+    }else if(inputSystem == 'vi'){
+      df <- vis_errors
+    }
+    return(df)
+  }
+  
 }
 
-aggregateAndSelectBR <- function(inputDF, sliderInput, cbInput){
-  df <- aggregate(list(errors=po_current_errors$Errors, whitelisted=po_current_errors$Whitelisted,
-                       failed=po_current_errors$Failed,confirmed=po_current_errors$Confirmed,
-                       unhandled=po_current_errors$Unhandled),by=list(BR = po_current_errors$BR.number), FUN=sum)
-  df <- df[order(df$errors, decreasing = TRUE),]
+#aggregate failed of DF by BR and select the top x where x is specified in slider
+#notice: don' t double count lines for each dataelement, so use mean instead of sum
+aggregateAndSelectBR <- function(inputDF, sliderInput, inputTypes){
+  df <- aggregate(list(errors=inputDF$errors, whitelisted=inputDF$whitelisted,
+                       failed=inputDF$failed,blacklisted=inputDF$blacklisted,
+                       unhandled=inputDF$unhandled),by=list(BR = inputDF$BR.number), FUN=mean)
+  #order depending on types
+  df <- orderDF(df, inputTypes)
   if (!is.null(sliderInput)){
     selectedLength <- sliderInput
     df <- df[1:selectedLength,]
   }
-  df$BR <- gsub("PO_0", "", df$BR)
-  colnames(df) <- c("BR", "errors", "whitelisted", "failed", "confirmed", "unhandled")
+  colnames(df) <- c("BR", "errors", whitelisted, "failed", blacklisted, unhandled)
   return(df) 
 }  
 
+aggregateAndSelectDE <- function(inputDF, sliderInput, inputTypes){
+  df <- aggregate(list(errors=inputDF$errors, whitelisted=inputDF$whitelisted,
+                       failed=inputDF$failed,blacklisted=inputDF$blacklisted,
+                       unhandled=inputDF$unhandled),by=list(BR = inputDF$Data.Element), FUN=sum)
+  df <- orderDF(df, inputTypes)
+  if (!is.null(sliderInput)){
+    selectedLength <- sliderInput
+    df <- df[1:selectedLength,]
+  }
+  colnames(df) <- c("DE", "errors", whitelisted, "failed", blacklisted, unhandled)
+  return(df) 
+}
+
+#get failed elements from given files
+getDFErrors <- function(path, filenames){
+  df <- data.frame()
+  for (filename in filenames){
+    dfRead <- read.csv(file.path(path, filename), stringsAsFactors = FALSE, header = TRUE)  
+    df <- rbind(df, dfRead)
+  }
+  df_failed <- df[df$Errors > 0,]
+  df_failed$Data.Element <- sapply(df_failed$Data.Element, replaceDEString)
+  df_failed$Source.Date <- as.Date(df_failed$Source.Date, "%Y-%m-%d")
+  return(df_failed)
+}
+
+#get df elements for given date
+getDFByDate <- function(df, sourceDate){
+  df$Data.Element <- sapply(df$Data.Element, replaceDEString)
+  df_current <- subset(df, Source.Date == as.Date(sourceDate))
+  return(df_current)
+}
+
+#subset DF by count of inputypes
+subsetDF <- function(df, inputTypes){
+  if(identical(inputTypes, types)){
+    df <- df[df$errors > 0,]
+  }else if(identical(inputTypes, c(unhandled, blacklisted))){
+    df <- df[df$failed > 0,]
+  }else if(identical(inputTypes, c(blacklisted, whitelisted))){
+    df <- df[df$blacklisted + df$whitelisted > 0,]
+  }else if(identical(inputTypes, c(unhandled, whitelisted))){
+    df <- df[df$unhandled + df$whitelisted > 0,]
+  }else if(identical(inputTypes, c(unhandled))){
+    df <- df[df$unhandled > 0,]
+  }else if(identical(inputTypes, c(blacklisted))){
+    df <- df[df$blacklisted > 0,]
+  }else if(identical(inputTypes, c(whitelisted))){
+    df <- df[df$whitelisted > 0,]
+  }
+  return(df)
+}
+
+#order DF based on input types
+orderDF <- function(df, inputTypes){
+  if(identical(inputTypes, types)){
+    df <- df[order(df$errors, decreasing = TRUE),]
+  }else if(identical(inputTypes, c(unhandled, blacklisted))){
+    df <- df[order(df$failed, decreasing = TRUE),]
+  }else if(identical(inputTypes, c(blacklisted, whitelisted))){
+    df <- df[order(df$blacklisted + df$whitelisted, decreasing = TRUE),]
+  }else if(identical(inputTypes, c(unhandled, whitelisted))){
+    df <- df[order(df$unhandled + df$whitelisted, decreasing = TRUE),]
+  }else if(identical(inputTypes, c(unhandled))){
+    df <- df[order(df$unhandled, decreasing = TRUE),]
+  }else if(identical(inputTypes, c(blacklisted))){
+    df <- df[order(df$blacklisted, decreasing = TRUE),]
+  }else if(identical(inputTypes, c(whitelisted))){
+    df <- df[order(df$whitelisted, decreasing = TRUE),]
+  }
+  return(df)
+}
 
 # format Data Element string to be able to sort
 replaceDEString <- function(inputString){
@@ -121,6 +315,48 @@ replaceDEString <- function(inputString){
   } else{
     return(inputString)
   }
+}
+
+#create time series plot of BR
+createBRDiffPlot <- function(df, selectInput){
+  if(is.null(selectInput))
+    return()
+  dfSelected <- df[df$BR.number == selectInput,]
+  dfSelected <- rename(dfSelected, c("Source.Date" = "Date", "failed" = "failures"))
+  if(nrow(df) >0){
+    return(ggplot(data=dfSelected, aes(x=Date, y=failures, group = 1)) + geom_point() + geom_line() + ggtitle(paste("Failures over time", selectInput)) +
+             scale_x_date(labels = date_format("%b-%Y")))
+  } else{
+    return()
+  }
+}
+
+#create time series plot of DE
+createDEDiffPlot <- function(df, selectInput){
+  if(is.null(selectInput))
+    return()
+  dfSelected <- df[df$Data.Element == selectInput,]
+  dfSelected <- aggregate(dfSelected$failed, by=list(Date=dfSelected$Source.Date), FUN=sum)
+  dfSelected <- rename(dfSelected, c("x" = "failures"))
+  if(nrow(dfSelected) >0){
+    return(ggplot(data=dfSelected, aes(x=Date, y=failures, group = 1)) + geom_point() + geom_line() + 
+             ggtitle(paste("Failures over time", selectInput)) + scale_x_date(labels = date_format("%b-%Y"))) 
+  } else{
+    return()
+  }
+}
+
+#rename columns
+renameColumns <- function(df){
+  colnames(df)[colnames(df) == 'Errors'] <- 'errors'
+  colnames(df)[colnames(df) == 'Whitelisted'] <- 'whitelisted'
+  colnames(df)[colnames(df) == 'Failed'] <- 'failed'
+  colnames(df)[colnames(df) == 'Blacklisted'] <- 'blacklisted'
+  colnames(df)[colnames(df) == 'Unhandled'] <- 'unhandled'
+  df$BR.number <- gsub("PO_0", "", df$BR.number)
+  df$BR.number <- gsub("FA_0", "", df$BR.number)
+  df$BR.number <- gsub("GL_", "", df$BR.number)
+  return(df)
 }
 
 #create shiny app
